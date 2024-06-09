@@ -1,0 +1,43 @@
+pip install flask flask-cors pymongo
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from pymongo import MongoClient
+from datetime import datetime
+
+app = Flask(__name__)
+CORS(app)
+
+# Replace <username>, <password>, and <your-cluster-url> with your actual MongoDB Atlas connection details
+client = MongoClient('mongodb+srv://<username>:<password>@cluster0.mongodb.net/attendance_system?retryWrites=true&w=majority')
+db = client['attendance_system']
+attendance_collection = db['attendance']
+
+@app.route('/mark_attendance', methods=['POST'])
+def mark_attendance():
+    data = request.get_json()
+    student_id = data['student_id']
+    timestamp = datetime.utcnow()
+
+    attendance_record = {
+        'student_id': student_id,
+        'timestamp': timestamp
+    }
+    attendance_collection.insert_one(attendance_record)
+    return jsonify({"message": "Attendance marked successfully"}), 201
+
+@app.route('/get_attendance', methods=['GET'])
+def get_attendance():
+    student_id = request.args.get('student_id')
+    records = attendance_collection.find({'student_id': student_id})
+
+    attendance_list = []
+    for record in records:
+        attendance_list.append({
+            'student_id': record['student_id'],
+            'timestamp': record['timestamp']
+        })
+
+    return jsonify(attendance_list), 200
+
+if __name__ == '__main__':
+    app.run(port=5000, debug=True)
