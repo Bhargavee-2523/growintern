@@ -1,0 +1,172 @@
+pip install flask flask-cors flask-jwt-extended flask-bcrypt pymongo
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from flask_bcrypt import Bcrypt
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from pymongo import MongoClient
+
+app = Flask(__name__)
+app.config['JWT_SECRET_KEY'] = 'your_jwt_secret_key'
+CORS(app)
+bcrypt = Bcrypt(app)
+jwt = JWTManager(app)
+
+client = MongoClient('mongodb://localhost:27017/')
+db = client['campus_automation']
+users_collection = db['users']
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    email = data['email']
+    password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
+    role = data['role']
+    
+    if users_collection.find_one({"email": email}):
+        return jsonify({"error": "User already exists"}), 400
+    
+    users_collection.insert_one({"email": email, "password": password, "role": role})
+    return jsonify({"message": "User registered successfully"}), 201
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    email = data['email']
+    password = data['password']
+    
+    user = users_collection.find_one({"email": email})
+    if not user or not bcrypt.check_password_hash(user['password'], password):
+        return jsonify({"error": "Invalid credentials"}), 400
+    
+    access_token = create_access_token(identity={"email": email, "role": user['role']})
+    return jsonify({"token": access_token, "role": user['role']}), 200
+
+@app.route('/dashboard', methods=['GET'])
+@jwt_required()
+def dashboard():
+    current_user = get_jwt_identity()
+    role = current_user['role']
+    return jsonify({"message": f"Welcome to the {role.capitalize()} Dashboard"}), 200
+
+if __name__ == '__main__':
+    app.run(port=5000, debug=True)
+
+
+
+
+Frontend (HTML + JavaScript)
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campus Automation</title>
+</head>
+<body>
+    <h1>Welcome to Campus Automation System</h1>
+    <div id="content">
+        <button onclick="showLoginForm()">Login</button>
+        <button onclick="showRegisterForm()">Register</button>
+    </div>
+
+    <script>
+        function showLoginForm() {
+            document.getElementById('content').innerHTML = `
+                <h2>Login</h2>
+                <input type="email" id="loginEmail" placeholder="Email"><br>
+                <input type="password" id="loginPassword" placeholder="Password"><br>
+                <button onclick="login()">Login</button>
+            `;
+        }
+
+        function showRegisterForm() {
+            document.getElementById('content').innerHTML = `
+                <h2>Register</h2>
+                <input type="email" id="registerEmail" placeholder="Email"><br>
+                <input type="password" id="registerPassword" placeholder="Password"><br>
+                <select id="registerRole">
+                    <option value="student">Student</option>
+                    <option value="faculty">Faculty</option>
+                    <option value="company">Company</option>
+                </select><br>
+                <button onclick="register()">Register</button>
+            `;
+        }
+
+        async function login() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            const response = await fetch('http://localhost:5000/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ email, password })
+            });
+            const data = await response.json();
+
+            if (response.status === 200) {
+                localStorage.setItem('token', data.token);
+                localStorage.setItem('role', data.role);
+                showDashboard();
+            } else {
+                alert(data.error);
+            }
+        }
+
+        async function register() {
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+            const role = document.getElementById('registerRole').value;
+
+            const response = await fetch('http://localhost:5000/register', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ email, password, role })
+            });
+            const data = await response.json();
+
+            if (response.status === 201) {
+                alert('User registered successfully');
+                showLoginForm();
+            } else {
+                alert(data.error);
+            }
+        }
+
+        async function showDashboard() {
+            const token = localStorage.getItem('token');
+            const role = localStorage.getItem('role');
+
+            const response = await fetch('http://localhost:5000/dashboard', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            const data = await response.json();
+
+            if (response.status === 200) {
+                document.getElementById('content').innerHTML = `
+                    <h2>${data.message}</h2>
+                    <button onclick="logout()">Logout</button>
+                `;
+            } else {
+                alert(data.error);
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('role');
+            document.getElementById('content').innerHTML = `
+                <button onclick="showLoginForm()">Login</button>
+                <button onclick="showRegisterForm()">Register</button>
+            `;
+        }
+    </script>
+</body>
+</html>
